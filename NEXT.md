@@ -65,6 +65,19 @@ cd ~/aloha_project/act && git apply ~/aloha_project/aloha-study-log/patches/act.
 | 산출물 | `~/aloha_project/ckpt/sim_transfer_cube_scripted_act/` (23개, 7.2 GB) |
 | 로그 | `~/aloha_project/ckpt/train.log` |
 
+현재 `~/aloha_project/ckpt/`에 남아 있는 것 (총 7.9 GB, 디스크 여유 892 GB):
+
+```
+ckpt/
+├── sim_transfer_cube_scripted_act/   체크포인트 23개 + rollout 영상 100개
+├── train.log                          학습 로그 (val loss 추이 분석에 사용)
+├── eval_no_agg.log                    평가 1회차
+└── eval_temporal_agg.log              평가 2회차
+```
+
+> 💡 중간 체크포인트(`policy_epoch_*.ckpt`, 21개 ≈ 7 GB)는 학습 곡선 비교용이 아니면
+> 지워도 된다. 평가는 `policy_best.ckpt`만 쓴다.
+
 ### 평가 — 기대치(≈90%) 달성 ✅
 
 | | temporal_agg 끔 | temporal_agg 켬 |
@@ -82,8 +95,8 @@ cd ~/aloha_project/act && git apply ~/aloha_project/aloha-study-log/patches/act.
 
 재현 명령은 [docs/01-act-sim.md](docs/01-act-sim.md)에, 과정은 [logs/2026-09-18.md](logs/2026-09-18.md)에 있습니다.
 
-**정리할 것**
-- [ ] 스모크 테스트 산출물 삭제: `rm -rf ~/aloha_project/ckpt/smoke_test ~/aloha_project/ckpt/smoke_test20` (2.6 GB)
+**정리할 것** — 전부 완료 ✅
+- [x] ~~스모크 테스트 산출물 삭제~~ (2.6 GB, 2026-09-18 처리)
 - [x] ~~잘못 생성된 `~/aloha_project/act/dataset/` 삭제~~ (352 MB, 2026-09-18 처리)
 - [x] ~~`act/play_video.py`, `act/model_test.py` 백업~~ → [patches/act-extra/](patches/act-extra/) (2026-09-18 처리)
 - [x] ~~`~/.bashrc`의 렌더링 export 3줄을 `docs/00-environment.md`에 옮겨 적기~~ (2026-09-18)
