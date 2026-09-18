@@ -3,8 +3,9 @@
 > 이 파일은 "며칠/몇 주 뒤에 돌아왔을 때 3분 안에 다시 시작하기" 위한 파일입니다.
 > 작업을 마칠 때마다 이 파일을 갱신하세요.
 
-**마지막 작업일: 2026-09-18** (ACT 학습 2000 epoch 완료 + 데모 생성 구조 개념 정리)
-**중단 지점: 학습 끝(38분, best val loss 0.0458 @ epoch 1995). 평가(eval)는 아직 안 돌림.**
+**마지막 작업일: 2026-09-18** (ACT 학습·평가 완료 + 데모 생성 구조 개념 정리)
+**중단 지점: 🎉 파이프라인 전체 검증 완료. 성공률 94%(agg 끔) / 98%(agg 켬)로 기대치 달성.
+다음은 "무엇을 더 해볼까"를 고르는 단계 — 아래 1번 참고.**
 
 > 💡 "시뮬 안에서 팔이 어떻게 움직이고, 코드가 만든 데모로 학습하는 게 왜 의미가 있는가"는
 > [docs/01-act-sim.md](docs/01-act-sim.md)의 **"⭐ 개념 정리"** 섹션에 정리해둠.
@@ -34,51 +35,27 @@ cd ~/aloha_project/act && git apply ~/aloha_project/aloha-study-log/patches/act.
 
 ---
 
-## 1. ▶ 바로 할 일: 학습한 정책 평가하기
+## 1. ▶ 바로 할 일: 다음 실험 고르기
 
-**학습 명령에 `--eval`만 추가**합니다 (`policy_best.ckpt`를 자동으로 불러옴).
-하이퍼파라미터는 학습 때와 **완전히 같아야** 모델 구조가 맞습니다.
+**기본 파이프라인(데이터 생성 → 학습 → 평가)은 끝까지 검증됐습니다.** 기준 성공률도 확보했으니
+이제부터는 "무엇을 바꾸면 어떻게 되는가"를 보는 단계입니다. 아래 셋 중 하나를 고르세요.
 
-```bash
-conda activate act
-export ALOHA_DATA_DIR=~/aloha_project/aloha_data
-cd ~/aloha_project/act
+| 선택지 | 무엇을 배우나 | 비용 | 추가 디스크 |
+|--------|--------------|------|------------|
+| **A. `_human` 데이터 비교** (→ 4-2) | 멀티모달 데모가 왜 어려운지, CVAE가 왜 필요한지 | 다운로드 + 학습 40분 | +18 GB |
+| **B. Diffusion Policy** (→ 3번 2항) | ACT 대비 다른 알고리즘의 성능 | 학습 시간 미지 | 없음 (데이터 재사용) |
+| **C. `inject_noise` 비교** (→ 4-1) | 데이터 다양성과 복원력의 트레이드오프 | 코드 수정 + 재생성 + 학습 | +18 GB |
 
-# (1) temporal_agg 끄고
-python3 imitate_episodes.py \
-  --task_name sim_transfer_cube_scripted \
-  --ckpt_dir ~/aloha_project/ckpt/sim_transfer_cube_scripted_act \
-  --policy_class ACT \
-  --kl_weight 10 --chunk_size 100 --hidden_dim 512 --batch_size 8 \
-  --dim_feedforward 3200 --num_epochs 2000 --lr 1e-5 --seed 0 \
-  --eval
-
-# (2) temporal_agg 켜고
-#     위와 동일 + 맨 끝에 --temporal_agg
-```
-
-**주의**
-- ⚠️ 평가는 **렌더링을 하므로** `GALLIUM_DRIVER=d3d12`가 적용된 터미널에서 실행할 것.
-  적용 안 되면 소프트웨어 렌더링(llvmpipe)으로 떨어져 4.7배 느려짐
-  → [logs/2026-09-18.md](logs/2026-09-18.md) 2부 참고. `~/.bashrc`에 넣어뒀으므로 새 터미널이면 자동 적용.
-  확인: `echo $GALLIUM_DRIVER` → `d3d12`
-- rollout 영상과 성공률은 `--ckpt_dir` 안에 저장됨
-- **기대치**: transfer cube 성공률 약 **90%**
-- [ ] `--temporal_agg` 있을 때 / 없을 때 성공률을 둘 다 재서 비교 기록
-
-**성공률이 기대치보다 많이 낮다면** → 하이퍼파라미터를 건드리기 전에 **학습을 더 돌리는 것부터**:
-
-```bash
---num_epochs 5000 --ckpt_dir ~/aloha_project/ckpt/sim_transfer_cube_scripted_act_5000
-```
-
-2000 epoch 학습에서 **val loss가 끝까지 내려가는 중이었음**(best @ epoch 1995, 마지막 500구간에서 27% 추가 개선).
-즉 아직 수렴 전이고, 1 epoch = 45 샘플뿐이라 5000 epoch도 약 96분이면 끝납니다.
-근거 데이터는 [docs/01-act-sim.md](docs/01-act-sim.md) 참고. `--ckpt_dir`을 꼭 분리해야 기존 결과가 안 덮어써집니다.
+> 💡 **추천은 A.** 지금 기준값(scripted 94/98%)이 있는 상태에서 `_human`을 붙이면
+> "코드가 만든 데모 vs 사람이 만든 데모"라는 [docs/01-act-sim.md](docs/01-act-sim.md) 개념 정리의
+> 핵심 주장을 **숫자로 직접 확인**할 수 있습니다. 코드 수정도 필요 없습니다
+> (`SIM_TASK_CONFIGS`에 `sim_transfer_cube_human` 항목이 이미 있음).
 
 ---
 
-## 2. 완료: ACT 학습 (2026-09-18)
+## 2. 완료: ACT 학습 + 평가 (2026-09-18) 🎉
+
+### 학습
 
 | 항목 | 값 |
 |------|-----|
@@ -88,7 +65,22 @@ python3 imitate_episodes.py \
 | 산출물 | `~/aloha_project/ckpt/sim_transfer_cube_scripted_act/` (23개, 7.2 GB) |
 | 로그 | `~/aloha_project/ckpt/train.log` |
 
-재현이 필요하면 명령은 [docs/01-act-sim.md](docs/01-act-sim.md)에, 과정은 [logs/2026-09-18.md](logs/2026-09-18.md)에 있습니다.
+### 평가 — 기대치(≈90%) 달성 ✅
+
+| | temporal_agg 끔 | temporal_agg 켬 |
+|---|---|---|
+| **Success rate** | **0.94** (47/50) | **0.98** (49/50) |
+| Average return | 592.66 | **669.04** |
+| 소요 시간 | 9분 32초 | 15분 19초 |
+| 영상 | `rollouts_no_agg/` | `rollouts_temporal_agg/` |
+| 로그 | `ckpt/eval_no_agg.log` | `ckpt/eval_temporal_agg.log` |
+
+- 실패는 거의 전부 **파지(grasp) 단계**. 집기만 하면 전달은 사실상 따라온다.
+- **val loss가 수렴하지 않았는데도 94~98%가 나왔다** → 예정했던 `--num_epochs 5000`
+  재학습은 **불필요**. "loss를 더 낮춰야 성공률이 오른다"가 항상 맞지는 않음.
+- ⚠️ 평가 2회 돌릴 땐 rollout 영상이 덮어써지므로 1회차를 먼저 옮길 것.
+
+재현 명령은 [docs/01-act-sim.md](docs/01-act-sim.md)에, 과정은 [logs/2026-09-18.md](logs/2026-09-18.md)에 있습니다.
 
 **정리할 것**
 - [ ] 스모크 테스트 산출물 삭제: `rm -rf ~/aloha_project/ckpt/smoke_test ~/aloha_project/ckpt/smoke_test20` (2.6 GB)
@@ -122,7 +114,7 @@ python3 imitate_episodes.py \
 > 알고리즘의 어려운 부분(**멀티모달 데모 처리**)은 잘 드러나지 않는다.
 > 개념 정리는 [docs/01-act-sim.md](docs/01-act-sim.md)의 "⭐ 개념 정리" 섹션 5번 참고.
 >
-> ⚠️ 둘 다 **평가(1번)를 먼저 끝내고 기준 성공률을 확보한 뒤에** 할 것. 비교 대상이 없으면 의미가 없다.
+> ✅ 기준 성공률 확보 완료 (`_scripted` 94% / 98%, 2026-09-18). 이제 비교 실험을 해도 된다.
 
 ### 4-1. `inject_noise=True`로 데이터를 다시 만들어 비교
 
@@ -165,7 +157,7 @@ inject_noise = False   # → True
 
 | 데이터셋 | 데모 생성 주체 | 멀티모달리티 | 성공률 |
 |---|---|---|---|
-| `sim_transfer_cube_scripted` | 코드 (waypoint 보간) | 없음 | (평가 대기) |
+| `sim_transfer_cube_scripted` | 코드 (waypoint 보간) | 없음 | **94% / 98%** ← 기준 |
 | `..._scripted` + `inject_noise` | 코드 + ±0.01 노이즈 | 약간 | (미실행) |
 | `sim_transfer_cube_human` | 사람 (teleoperation) | 있음 | (미실행) |
 

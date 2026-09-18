@@ -161,6 +161,16 @@ glxinfo -B | grep "OpenGL renderer"
 **교훈** — `MESA_LOADER_DRIVER_OVERRIDE=d3d12`는 효과가 없고 `GALLIUM_DRIVER=d3d12`만 동작했다.
 그리고 **CUDA가 된다고 OpenGL도 GPU를 쓰는 건 아니다.** 둘은 완전히 다른 경로라 따로 확인해야 함.
 
+> ⚠️ **`~/.bashrc`에 넣어둬도 안심하면 안 된다 (2026-09-18 평가 때 겪음)**
+> `~/.bashrc`는 **대화형 셸에서만** 읽힌다 (상단의 `case $- in *i*) ;; *) return;; esac`).
+> 스크립트, `bash -c`, cron, 일부 자동화 도구에서는 적용되지 않아 조용히 llvmpipe로 떨어진다.
+> 긴 작업을 걸기 전에 반드시 확인:
+>
+> ```bash
+> echo $GALLIUM_DRIVER      # 비어 있으면 아래처럼 명시적으로 export
+> export MUJOCO_GL=glfw PYOPENGL_PLATFORM=glx GALLIUM_DRIVER=d3d12
+> ```
+
 ---
 
 ## #7. `--dataset_dir`에 상대경로를 주면 엉뚱한 곳에 데이터가 생성됨

@@ -16,7 +16,7 @@
 | 학습 스모크 테스트 (2 / 20 epoch) | ✅ | 2026-09-18 |
 | 학습 (train, 2000 epoch) | ✅ | 2026-09-18 |
 | 개념 정리 (데모 생성 구조 / 무엇을 학습하는가) | ✅ | 2026-09-18 |
-| **평가 (eval)** | ⬜ **미시작** | — |
+| 평가 (eval) | ✅ **성공률 94% / 98%** | 2026-09-18 |
 
 > 코드를 돌리기 전에 **"시뮬에서 팔은 누가 움직이고, 정책은 무엇을 배우는가"**가 궁금하다면
 > 맨 아래 [⭐ 개념 정리](#-개념-정리-시뮬에서-데모는-누가-만들고-정책은-무엇을-배우는가) 섹션부터 읽을 것.
@@ -211,8 +211,8 @@ def __len__(self):
 | 최종 train loss | 0.136 (l1 0.041 / kl 0.010) |
 | 최대 VRAM 사용량 | 4,840 MiB / 11,264 MiB |
 | 체크포인트 | 23개, 7.2 GB, `~/aloha_project/ckpt/sim_transfer_cube_scripted_act/` |
-| 평가 성공률 (temporal_agg 끔) | (미측정) |
-| 평가 성공률 (temporal_agg 켬) | (미측정) |
+| 평가 성공률 (temporal_agg 끔) | **94%** (47/50) |
+| 평가 성공률 (temporal_agg 켬) | **98%** (49/50) |
 
 ### ⚠️ val loss가 아직 수렴하지 않았음
 
@@ -232,6 +232,68 @@ best epoch가 **1995**로 거의 마지막이고, 마지막 500구간이 직전 
 → 평가 성공률이 기대치(≈90%)에 못 미치면 **하이퍼파라미터보다 `--num_epochs 5000`을 먼저** 시도.
 1 epoch = 45 샘플뿐이라 5000 epoch도 약 96분이면 끝난다.
 저자 튜닝 문서의 "loss가 평평해진 뒤에도 더 학습하면 성공률이 계속 오른다"와 방향이 일치한다.
+
+> ✅ **후속**: 실제로 평가해보니 **94% / 98%** 로 기대치를 넘겼다.
+> val loss가 수렴하지 않았는데도 충분한 성능이 나왔으므로 **5000 epoch 재학습은 불필요**해졌다.
+> "loss를 더 낮춰야 성공률이 오른다"는 직관이 항상 맞지는 않는다는 사례.
+
+---
+
+## 평가 결과 (2026-09-18)
+
+```bash
+conda activate act
+# ⚠️ 비대화형 셸에서는 ~/.bashrc가 적용 안 되므로 렌더링 변수를 명시적으로 export
+export ALOHA_DATA_DIR=~/aloha_project/aloha_data \
+       MUJOCO_GL=glfw PYOPENGL_PLATFORM=glx GALLIUM_DRIVER=d3d12
+cd ~/aloha_project/act
+
+python3 -u imitate_episodes.py \
+  --task_name sim_transfer_cube_scripted \
+  --ckpt_dir ~/aloha_project/ckpt/sim_transfer_cube_scripted_act \
+  --policy_class ACT --kl_weight 10 --chunk_size 100 --hidden_dim 512 \
+  --batch_size 8 --dim_feedforward 3200 --num_epochs 2000 --lr 1e-5 --seed 0 \
+  --eval                    # 2회차는 여기에 --temporal_agg 추가
+```
+
+`policy_best.ckpt`(epoch 1995)를 불러와 **50회 rollout** (`imitate_episodes.py:198`).
+
+| | temporal_agg 끔 | temporal_agg 켬 |
+|---|---|---|
+| **Success rate** | **0.94** (47/50) | **0.98** (49/50) |
+| Average return | 592.66 | **669.04** |
+| 소요 시간 | 9분 32초 | 15분 19초 |
+
+**temporal ensembling이 +4%p, average return은 +13%.** 대신 시간이 1.6배.
+매 스텝 추론하기 때문이다 (끄면 `chunk_size`=100 스텝마다 1회, 즉 rollout당 4회).
+
+### 보상 단계별 분포 — 실패가 어디서 나는가
+
+`sim_transfer_cube`의 최대 보상은 4이고 단계마다 1씩 오른다.
+
+| 도달 보상 | 의미 | agg 끔 | agg 켬 |
+|---|---|---|---|
+| ≥ 1 | 오른팔이 큐브에 접촉 | 48/50 (96%) | **50/50 (100%)** |
+| ≥ 2 | 큐브를 집어 듦 | 48/50 (96%) | 49/50 (98%) |
+| ≥ 3 | 왼팔로 전달 시도 | 47/50 (94%) | 49/50 (98%) |
+| ≥ 4 | **전달 성공(= 성공 판정)** | 47/50 (94%) | 49/50 (98%) |
+
+- **실패는 거의 전부 파지(grasp) 단계에 몰려 있다.** 일단 집으면 전달은 사실상 따라온다
+  (agg 끔 48→47, agg 켬 49→49).
+- temporal_agg가 개선한 지점도 정확히 거기다. 접촉 실패 2건이 0건이 됐다.
+  여러 chunk의 예측을 가중 평균하므로 **접근 궤적이 매끄러워져** 초기 정렬이 좋아진 것으로 보인다.
+
+### ⚠️ 평가를 두 번 돌릴 때 주의
+
+`eval_bc(save_episode=True)`가 rollout 영상을 `ckpt_dir`에 **`video0.mp4` ~ `video49.mp4` 고정 이름**으로
+저장한다. 2회차를 그냥 돌리면 1회차 영상이 전부 덮어써진다.
+
+```bash
+cd ~/aloha_project/ckpt/sim_transfer_cube_scripted_act
+mkdir -p rollouts_no_agg && mv *.mp4 rollouts_no_agg/     # 2회차 돌리기 전에
+```
+
+현재 `rollouts_no_agg/`(310 MB), `rollouts_temporal_agg/`(309 MB)로 분리 보관 중.
 
 ---
 

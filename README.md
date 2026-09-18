@@ -19,8 +19,8 @@ Mobile ALOHA와 ACT(Action Chunking with Transformers)를 따라 해보면서 �
 | 3 | 시뮬 데이터 생성 (`sim_transfer_cube_scripted` 50 ep) | ✅ 완료 | 18 GB, 2026-09-16 ~ 09-17 |
 | 4 | 데이터 시각화 확인 | ✅ 완료 | `episode_0_video.mp4`, `episode_0_qpos.png` 생성 확인 |
 | 5 | ACT 학습 (train) | ✅ 완료 | 2000 epoch / 38분 / best val loss 0.0458 @ epoch 1995 → [docs/01-act-sim.md](docs/01-act-sim.md) |
-| 6 | **ACT 평가 (eval, success rate)** | ⬜ **미시작 ← 여기부터** | 목표: transfer cube ≈ 90% → [NEXT.md](NEXT.md) |
-| 7 | act-plus-plus (Diffusion Policy) | 🟡 준비만 완료 | import 버그 수정까지 끝, 아직 실행 안 함 |
+| 6 | ACT 평가 (eval, success rate) | ✅ 완료 | **94%** (agg 끔) / **98%** (agg 켬) — 목표 90% 달성 🎉 |
+| 7 | **act-plus-plus (Diffusion Policy)** | 🟡 **준비만 완료 ← 여기부터** | import 버그 수정까지 끝, 아직 실행 안 함 → [NEXT.md](NEXT.md) |
 | 8 | mobile-aloha (실기/하드웨어) | ⬜ 미진행 | 참고용으로 clone만 해둔 상태 |
 
 범례: ✅ 완료 · 🟡 진행 중/부분 완료 · ⬜ 미시작
