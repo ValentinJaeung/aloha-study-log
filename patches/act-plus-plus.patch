@@ -1,0 +1,27 @@
+diff --git a/constants.py b/constants.py
+index 266a812..258d3df 100644
+--- a/constants.py
++++ b/constants.py
+@@ -2,7 +2,7 @@ import pathlib
+ import os
+ 
+ ### Task parameters
+-DATA_DIR = '/home/zfu/interbotix_ws/src/act/data' if os.getlogin() == 'zfu' else '/scr/tonyzhao/datasets'
++DATA_DIR = os.environ.get('ALOHA_DATA_DIR', os.path.expanduser('~/aloha_project/aloha_data'))
+ SIM_TASK_CONFIGS = {
+     'sim_transfer_cube_scripted':{
+         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
+diff --git a/policy.py b/policy.py
+index 4e4a0aa..b646593 100644
+--- a/policy.py
++++ b/policy.py
+@@ -9,7 +9,8 @@ e = IPython.embed
+ 
+ from collections import OrderedDict
+ from robomimic.models.base_nets import ResNet18Conv, SpatialSoftmax
+-from robomimic.algo.diffusion_policy import replace_bn_with_gn, ConditionalUnet1D
++from robomimic.algo.diffusion_policy import replace_bn_with_gn
++from robomimic.models.diffusion_policy_nets import ConditionalUnet1D
+ 
+ 
+ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler

@@ -1,0 +1,29 @@
+# 이 저장소에는 "기록"만 넣습니다. 코드/데이터/체크포인트는 올리지 않습니다.
+
+# 데이터셋 (에피소드 1개가 368MB, 태스크 1개가 18GB)
+*.hdf5
+*.h5
+aloha_data/
+
+# 학습 결과물
+*.ckpt
+*.pth
+*.pt
+ckpt/
+wandb/
+
+# 큰 미디어 — 필요한 것만 `git add -f` 로 예외 추가
+*.mp4
+*.avi
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+
+# 에디터 / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp

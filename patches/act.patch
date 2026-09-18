@@ -1,0 +1,43 @@
+diff --git a/constants.py b/constants.py
+index f445350..8568b84 100644
+--- a/constants.py
++++ b/constants.py
+@@ -1,7 +1,8 @@
++import os
+ import pathlib
+ 
+ ### Task parameters
+-DATA_DIR = '<put your data dir here>'
++DATA_DIR = os.environ.get('ALOHA_DATA_DIR', os.path.expanduser('~/aloha_project/aloha_data'))
+ SIM_TASK_CONFIGS = {
+     'sim_transfer_cube_scripted':{
+         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
+diff --git a/record_sim_episodes.py b/record_sim_episodes.py
+index 253fdea..88ed4e3 100644
+--- a/record_sim_episodes.py
++++ b/record_sim_episodes.py
+@@ -26,6 +26,7 @@ def main(args):
+     task_name = args['task_name']
+     dataset_dir = args['dataset_dir']
+     num_episodes = args['num_episodes']
++    start_idx = args['start_idx']
+     onscreen_render = args['onscreen_render']
+     inject_noise = False
+     render_cam_name = 'angle'
+@@ -43,7 +44,7 @@ def main(args):
+         raise NotImplementedError
+ 
+     success = []
+-    for episode_idx in range(num_episodes):
++    for episode_idx in range(start_idx, start_idx + num_episodes):
+         print(f'{episode_idx=}')
+         print('Rollout out EE space scripted policy')
+         # setup the environment
+@@ -183,6 +184,7 @@ if __name__ == '__main__':
+     parser.add_argument('--task_name', action='store', type=str, help='task_name', required=True)
+     parser.add_argument('--dataset_dir', action='store', type=str, help='dataset saving dir', required=True)
+     parser.add_argument('--num_episodes', action='store', type=int, help='num_episodes', required=False)
++    parser.add_argument('--start_idx', action='store', type=int, help='episode index to start from', default=0, required=False)
+     parser.add_argument('--onscreen_render', action='store_true')
+     
+     main(vars(parser.parse_args()))
