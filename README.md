@@ -18,8 +18,8 @@ Mobile ALOHA와 ACT(Action Chunking with Transformers)를 따라 해보면서 �
 | 2 | 코드 경로/버그 수정 | ✅ 완료 | 수정본은 [patches/](patches/)에 diff로 보관 |
 | 3 | 시뮬 데이터 생성 (`sim_transfer_cube_scripted` 50 ep) | ✅ 완료 | 18 GB, 2026-09-16 ~ 09-17 |
 | 4 | 데이터 시각화 확인 | ✅ 완료 | `episode_0_video.mp4`, `episode_0_qpos.png` 생성 확인 |
-| 5 | **ACT 학습 (train)** | ⬜ **미시작 ← 여기부터** | [NEXT.md](NEXT.md) 참고 |
-| 6 | ACT 평가 (eval, success rate) | ⬜ 미시작 | 목표: transfer cube ≈ 90% |
+| 5 | ACT 학습 (train) | ✅ 완료 | 2000 epoch / 38분 / best val loss 0.0458 @ epoch 1995 → [docs/01-act-sim.md](docs/01-act-sim.md) |
+| 6 | **ACT 평가 (eval, success rate)** | ⬜ **미시작 ← 여기부터** | 목표: transfer cube ≈ 90% → [NEXT.md](NEXT.md) |
 | 7 | act-plus-plus (Diffusion Policy) | 🟡 준비만 완료 | import 버그 수정까지 끝, 아직 실행 안 함 |
 | 8 | mobile-aloha (실기/하드웨어) | ⬜ 미진행 | 참고용으로 clone만 해둔 상태 |
 
@@ -33,6 +33,7 @@ Mobile ALOHA와 ACT(Action Chunking with Transformers)를 따라 해보면서 �
 aloha-study-log/
 ├── README.md              ← 지금 이 파일 (전체 진행 상황 대시보드)
 ├── NEXT.md                ← 다음에 이어서 할 작업 + 복붙용 명령어
+├── video.md               ← 영상 생성/재생 명령 메모
 ├── docs/
 │   ├── 00-environment.md  ← 환경 구축 (HW/SW 스펙, 설치 순서, 버전)
 │   ├── 01-act-sim.md      ← ACT 시뮬레이션 실습 기록
@@ -40,6 +41,7 @@ aloha-study-log/
 │   ├── 03-mobile-aloha.md ← mobile-aloha repo 관련 메모
 │   └── 90-troubleshooting.md ← 에러 & 해결 모음 ⭐
 ├── patches/               ← 원본 repo에 가한 수정 diff + pip freeze
+│   └── act-extra/         ← act/에 새로 추가한 스크립트 원본 (diff에 안 잡히는 신규 파일)
 └── logs/                  ← 날짜별 작업 일지 (TEMPLATE.md 복사해서 사용)
 ```
 

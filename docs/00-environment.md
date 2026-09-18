@@ -11,9 +11,10 @@
 | OS | WSL2 (Linux 6.18.33.2-microsoft-standard-WSL2) |
 | 작업 루트 | `~/aloha_project/` |
 
-> 💡 VRAM 11 GB는 ACT 기본 설정(`batch_size 8`)에 빠듯할 수 있음. OOM 시 `--batch_size 4`로.
-> ⚠️ WSL2에서는 on-screen rendering(`--onscreen_render`)이 X 서버/WSLg 설정에 따라 실패할 수 있으니,
-> 렌더링 없이 돌리는 걸 기본으로 하고 결과는 저장된 mp4로 확인하는 편이 안전함.
+> ✅ **VRAM 실측 (2026-09-18)**: ACT 기본 설정(`batch_size 8`)에서 **4,840 MiB**만 사용.
+> 11 GB로 충분하며 `--batch_size 4`로 낮출 필요 없음. (당초 "빠듯할 수 있음" 우려는 해소됨)
+> ✅ **WSLg 렌더링도 해결됨 (2026-09-18)**: 아래 [환경변수](#환경변수) 3줄로 on-screen rendering과
+> GPU 가속 오프스크린 렌더링 모두 정상 동작. → [90-troubleshooting.md](90-troubleshooting.md) #5
 
 ## conda 환경 2개
 
@@ -107,3 +108,33 @@ echo 'export ALOHA_DATA_DIR=$HOME/aloha_project/aloha_data' >> ~/.bashrc
 
 설정 안 해도 기본값이 `~/aloha_project/aloha_data`라서 동작하지만, 데이터를 다른 디스크로
 옮길 경우를 대비해 명시적으로 잡아두는 걸 권장.
+
+### WSLg 렌더링 설정 ⭐ (2026-09-18 추가)
+
+**이 3줄이 없으면** MuJoCo viewer가 OpenGL 오류로 안 뜨고, 떠도 CPU 소프트웨어 렌더링(llvmpipe)으로
+떨어져 **4.7배 느려짐**. 현재 `~/.bashrc:135-137`에 들어가 있음.
+
+```bash
+export MUJOCO_GL=glfw
+export PYOPENGL_PLATFORM=glx
+export GALLIUM_DRIVER=d3d12
+```
+
+| 변수 | 역할 |
+|------|------|
+| `MUJOCO_GL=glfw` | MuJoCo가 on-screen(GLFW) 백엔드를 쓰도록 명시 |
+| `PYOPENGL_PLATFORM=glx` | PyOpenGL이 WSLg의 `WAYLAND_DISPLAY`를 보고 EGL로 잘못 추측하는 것을 막음 |
+| `GALLIUM_DRIVER=d3d12` | WSLg의 GPU 가속 드라이버(`d3d12_dri.so`)를 강제 선택 |
+
+확인:
+
+```bash
+echo $GALLIUM_DRIVER                              # → d3d12
+glxinfo -B | grep "OpenGL renderer"               # → D3D12 (NVIDIA GeForce RTX 2080 Ti)
+```
+
+`llvmpipe`가 나오면 소프트웨어 렌더링 중이라는 뜻. 자세한 원인과 벤치마크는
+[90-troubleshooting.md](90-troubleshooting.md) #5 참고.
+
+> 평가(`--eval`)와 데이터 생성은 렌더링을 하므로 이 설정의 영향을 크게 받음.
+> **학습(train)은 렌더링을 하지 않아 무관.**

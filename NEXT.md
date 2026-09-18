@@ -3,8 +3,8 @@
 > 이 파일은 "며칠/몇 주 뒤에 돌아왔을 때 3분 안에 다시 시작하기" 위한 파일입니다.
 > 작업을 마칠 때마다 이 파일을 갱신하세요.
 
-**마지막 작업일: 2026-09-17** (데이터 생성 완료)
-**중단 지점: `sim_transfer_cube_scripted` 50 에피소드 생성까지 끝. ACT 학습은 아직 시작 안 함.**
+**마지막 작업일: 2026-09-18** (ACT 학습 2000 epoch 완료)
+**중단 지점: 학습 끝(38분, best val loss 0.0458 @ epoch 1995). 평가(eval)는 아직 안 돌림.**
 
 ---
 
@@ -31,66 +31,69 @@ cd ~/aloha_project/act && git apply ~/aloha_project/aloha-study-log/patches/act.
 
 ---
 
-## 1. ▶ 바로 할 일: ACT 학습 돌리기
+## 1. ▶ 바로 할 일: 학습한 정책 평가하기
+
+**학습 명령에 `--eval`만 추가**합니다 (`policy_best.ckpt`를 자동으로 불러옴).
+하이퍼파라미터는 학습 때와 **완전히 같아야** 모델 구조가 맞습니다.
 
 ```bash
 conda activate act
 export ALOHA_DATA_DIR=~/aloha_project/aloha_data
 cd ~/aloha_project/act
 
-python3 imitate_episodes.py \
-  --task_name sim_transfer_cube_scripted \
-  --ckpt_dir ~/aloha_project/ckpt/sim_transfer_cube_scripted_act \
-  --policy_class ACT \
-  --kl_weight 10 \
-  --chunk_size 100 \
-  --hidden_dim 512 \
-  --batch_size 8 \
-  --dim_feedforward 3200 \
-  --num_epochs 2000 \
-  --lr 1e-5 \
-  --seed 0
-```
-
-**시작 전 체크**
-- [ ] `mkdir -p ~/aloha_project/ckpt` 먼저 만들어 두기
-- [ ] 학습은 오래 걸리므로 `tmux` 안에서 실행 (WSL 터미널이 닫혀도 유지됨)
-      → `tmux new -s act` 로 시작, `Ctrl+b` `d` 로 빠져나오기, `tmux attach -t act` 로 복귀
-- [ ] 로그를 파일로도 남기기: 명령 끝에 `2>&1 | tee ~/aloha_project/ckpt/train.log`
-
-**주의할 점 (2080 Ti / VRAM 11 GB)**
-- `batch_size 8`은 저자 기본값. VRAM이 모자라면 `CUDA out of memory`가 나므로
-  `--batch_size 4`로 낮춰서 재시도 (낮추면 수렴이 느려질 수 있음).
-- 첫 1~2 epoch만 돌려보고 VRAM·속도를 먼저 확인한 뒤 2000 epoch를 거는 걸 권장.
-  → `--num_epochs 2` 로 한 번 테스트 실행.
-
-**끝나고 기록할 것** → `docs/01-act-sim.md`와 `logs/`에:
-- [ ] 1 epoch당 소요 시간, 전체 소요 시간
-- [ ] 최종/최소 validation loss, best checkpoint의 epoch
-- [ ] `nvidia-smi`로 본 최대 VRAM 사용량
-- [ ] 에러가 났다면 → `docs/90-troubleshooting.md`에 추가
-
----
-
-## 2. 그다음: 학습한 정책 평가
-
-학습이 끝나면 **같은 명령에 `--eval`만 추가**합니다 (best validation checkpoint를 불러옴).
-
-```bash
+# (1) temporal_agg 끄고
 python3 imitate_episodes.py \
   --task_name sim_transfer_cube_scripted \
   --ckpt_dir ~/aloha_project/ckpt/sim_transfer_cube_scripted_act \
   --policy_class ACT \
   --kl_weight 10 --chunk_size 100 --hidden_dim 512 --batch_size 8 \
   --dim_feedforward 3200 --num_epochs 2000 --lr 1e-5 --seed 0 \
-  --eval --temporal_agg
+  --eval
+
+# (2) temporal_agg 켜고
+#     위와 동일 + 맨 끝에 --temporal_agg
 ```
 
-- `--temporal_agg`: temporal ensembling 켜기 (보통 성능이 올라감)
-- rollout 영상은 `--ckpt_dir` 안에 저장됨
-- **기대치**: transfer cube 성공률 약 **90%**. 많이 낮으면 저자 튜닝 팁 문서 참고
-  (loss가 평평해진 뒤에도 더 오래 학습하면 성공률이 계속 오른다고 함)
+**주의**
+- ⚠️ 평가는 **렌더링을 하므로** `GALLIUM_DRIVER=d3d12`가 적용된 터미널에서 실행할 것.
+  적용 안 되면 소프트웨어 렌더링(llvmpipe)으로 떨어져 4.7배 느려짐
+  → [logs/2026-09-18.md](logs/2026-09-18.md) 2부 참고. `~/.bashrc`에 넣어뒀으므로 새 터미널이면 자동 적용.
+  확인: `echo $GALLIUM_DRIVER` → `d3d12`
+- rollout 영상과 성공률은 `--ckpt_dir` 안에 저장됨
+- **기대치**: transfer cube 성공률 약 **90%**
 - [ ] `--temporal_agg` 있을 때 / 없을 때 성공률을 둘 다 재서 비교 기록
+
+**성공률이 기대치보다 많이 낮다면** → 하이퍼파라미터를 건드리기 전에 **학습을 더 돌리는 것부터**:
+
+```bash
+--num_epochs 5000 --ckpt_dir ~/aloha_project/ckpt/sim_transfer_cube_scripted_act_5000
+```
+
+2000 epoch 학습에서 **val loss가 끝까지 내려가는 중이었음**(best @ epoch 1995, 마지막 500구간에서 27% 추가 개선).
+즉 아직 수렴 전이고, 1 epoch = 45 샘플뿐이라 5000 epoch도 약 96분이면 끝납니다.
+근거 데이터는 [docs/01-act-sim.md](docs/01-act-sim.md) 참고. `--ckpt_dir`을 꼭 분리해야 기존 결과가 안 덮어써집니다.
+
+---
+
+## 2. 완료: ACT 학습 (2026-09-18)
+
+| 항목 | 값 |
+|------|-----|
+| 소요 | **38분 10초** (2000 epoch, 1 epoch 1.15초) |
+| best val loss | **0.045839 @ epoch 1995** |
+| 최대 VRAM | 4,840 MiB / 11,264 MiB (`batch_size 8`로 여유 있음) |
+| 산출물 | `~/aloha_project/ckpt/sim_transfer_cube_scripted_act/` (23개, 7.2 GB) |
+| 로그 | `~/aloha_project/ckpt/train.log` |
+
+재현이 필요하면 명령은 [docs/01-act-sim.md](docs/01-act-sim.md)에, 과정은 [logs/2026-09-18.md](logs/2026-09-18.md)에 있습니다.
+
+**정리할 것**
+- [ ] 스모크 테스트 산출물 삭제: `rm -rf ~/aloha_project/ckpt/smoke_test ~/aloha_project/ckpt/smoke_test20` (2.6 GB)
+- [x] ~~잘못 생성된 `~/aloha_project/act/dataset/` 삭제~~ (352 MB, 2026-09-18 처리)
+- [x] ~~`act/play_video.py`, `act/model_test.py` 백업~~ → [patches/act-extra/](patches/act-extra/) (2026-09-18 처리)
+- [x] ~~`~/.bashrc`의 렌더링 export 3줄을 `docs/00-environment.md`에 옮겨 적기~~ (2026-09-18)
+- [x] ~~OpenGL 오류 항목을 `docs/90-troubleshooting.md`에 추가~~ → #5, #6, #7 추가 (2026-09-18)
+- [x] ~~루트의 `video.md` 정리~~ → 잘못된 명령 수정 + 경고 추가 (2026-09-18)
 
 ---
 

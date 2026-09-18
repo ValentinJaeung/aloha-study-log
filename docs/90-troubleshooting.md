@@ -112,19 +112,93 @@ python3 record_sim_episodes.py \
 
 ---
 
+## #5. WSL에서 MuJoCo viewer가 안 뜸 — `Attempt to retrieve context when no valid context`
+
+**증상** — `model_test.py`처럼 `dm_control` viewer를 띄우려 하면:
+
+```
+OpenGL.error.Error: Attempt to retrieve context when no valid context
+```
+
+**원인** — WSLg는 `WAYLAND_DISPLAY`를 자동으로 설정해둔다. PyOpenGL이 이 변수를 보고
+백엔드를 **EGL**로 추측하는데(`OpenGL/platform/__init__.py:36`), 정작 GLFW는
+**X11/GLX** 컨텍스트를 만든다. 서로 어긋나서 `eglGetCurrentContext()`가 `None`을 반환.
+
+**해결** — `~/.bashrc`에 3줄 추가 (→ [00-environment.md](00-environment.md) "WSLg 렌더링 설정")
+
+```bash
+export MUJOCO_GL=glfw
+export PYOPENGL_PLATFORM=glx
+export GALLIUM_DRIVER=d3d12
+```
+
+**교훈** — WSL에서 GUI/OpenGL이 이상하면 "렌더링을 포기"하기 전에 백엔드 불일치를 먼저 의심할 것.
+`MUJOCO_GL`(MuJoCo용)과 `PYOPENGL_PLATFORM`(PyOpenGL용)은 **별개 변수**라 둘 다 맞춰줘야 한다.
+
+---
+
+## #6. 렌더링이 GPU가 아니라 CPU(llvmpipe)로 돌고 있었음
+
+**증상** — 에러는 안 나지만 렌더링이 유난히 느림. 확인해보니:
+
+```bash
+glxinfo -B | grep "OpenGL renderer"
+# → OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits)
+```
+
+**원인** — CUDA는 정상인데(`torch.cuda.is_available() == True`) **OpenGL만** 소프트웨어
+래스터라이저를 쓰고 있었다. WSLg용 하드웨어 드라이버 `d3d12_dri.so`는 설치돼 있는데 자동 선택이 안 됨.
+
+**해결** — `export GALLIUM_DRIVER=d3d12`
+
+| 백엔드 | RENDERER | MuJoCo 오프스크린 렌더링 (480×640) |
+|--------|----------|-----------------------------------|
+| 기본 | llvmpipe (LLVM 20.1.2) | 33.3 fps |
+| `GALLIUM_DRIVER=d3d12` | D3D12 (NVIDIA GeForce RTX 2080 Ti) | **156.7 fps** |
+
+약 **4.7배** 차이. 데이터 생성과 평가(`--eval`) 시간이 그만큼 줄어든다.
+
+**교훈** — `MESA_LOADER_DRIVER_OVERRIDE=d3d12`는 효과가 없고 `GALLIUM_DRIVER=d3d12`만 동작했다.
+그리고 **CUDA가 된다고 OpenGL도 GPU를 쓰는 건 아니다.** 둘은 완전히 다른 경로라 따로 확인해야 함.
+
+---
+
+## #7. `--dataset_dir`에 상대경로를 주면 엉뚱한 곳에 데이터가 생성됨
+
+**증상** — 아래처럼 실행했더니 `act/dataset/episode_0.hdf5` (368 MB)가 새로 생성됨.
+
+```bash
+python3 record_sim_episodes.py --task_name sim_transfer_cube_scripted \
+  --dataset_dir dataset --num_episodes 50 --onscreen_render
+```
+
+**원인** — `--dataset_dir`은 **읽는 곳이 아니라 쓰는 곳**이다. 없으면 만들어서 처음부터 생성한다.
+`constants.py`의 `DATA_DIR`(= `ALOHA_DATA_DIR`)과는 별개 인자라 자동으로 이어지지 않는다.
+
+**해결** — 항상 절대경로 또는 `$ALOHA_DATA_DIR` 기준으로 지정:
+
+```bash
+--dataset_dir $ALOHA_DATA_DIR/sim_transfer_cube_scripted     # 어디서 실행하든 안전
+--dataset_dir ../aloha_data/sim_transfer_cube_scripted       # act/ 안에서 실행할 때
+```
+
+**교훈** — 18 GB짜리 작업을 다루는 스크립트는 경로를 잘못 주면 조용히 새로 만들기 시작한다.
+실행 직후 `ls -la` 로 **의도한 곳에 쓰이고 있는지** 한 번 확인하는 습관이 필요.
+
+---
+
 ## 아직 겪지 않았지만 대비해둘 것
 
-### `CUDA out of memory` (학습 시)
-RTX 2080 Ti는 VRAM 11 GB. 저자 기본값 `--batch_size 8`에서 터지면 `--batch_size 4`로.
-(배치를 줄이면 수렴이 느려지므로 epoch 수를 늘려야 할 수 있음)
+### ~~`CUDA out of memory` (학습 시)~~ → 해소됨 (2026-09-18)
+실측 결과 `--batch_size 8`에서 **4,840 MiB / 11,264 MiB**만 사용. 여유 6.4 GB.
+`--batch_size 4`로 낮출 필요 없음. 단, `chunk_size`나 `hidden_dim`을 키우면 다시 확인할 것.
 
-### WSL2에서 `--onscreen_render` 실패
-MuJoCo 렌더링이 X 서버/OpenGL 설정을 타므로 WSL에서는 실패할 수 있음.
-렌더링 없이 실행하고 저장된 mp4로 확인하는 쪽이 안전. 필요 시 `MUJOCO_GL=egl` 또는
-`MUJOCO_GL=osmesa` 환경변수를 시도해볼 것.
+### ~~WSL2에서 `--onscreen_render` 실패~~ → 해결됨, 위 #5 / #6 참고
+(당시 메모였던 `MUJOCO_GL=egl` / `osmesa` 시도는 결과적으로 정답이 아니었음.
+정답은 `glfw` + `PYOPENGL_PLATFORM=glx` + `GALLIUM_DRIVER=d3d12` 조합)
 
 ### 디스크 부족
-에피소드 1개 = 368 MB, 태스크 1개(50 ep) = 18 GB.
+에피소드 1개 = 368 MB, 태스크 1개(50 ep) = 18 GB. 체크포인트도 학습 1회당 7.2 GB.
 새 태스크 시작 전에 `df -h ~` 확인.
 
 ---
