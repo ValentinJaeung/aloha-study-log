@@ -15,7 +15,11 @@
 | 데이터 시각화 확인 | ✅ | 2026-09-16 |
 | 학습 스모크 테스트 (2 / 20 epoch) | ✅ | 2026-09-18 |
 | 학습 (train, 2000 epoch) | ✅ | 2026-09-18 |
+| 개념 정리 (데모 생성 구조 / 무엇을 학습하는가) | ✅ | 2026-09-18 |
 | **평가 (eval)** | ⬜ **미시작** | — |
+
+> 코드를 돌리기 전에 **"시뮬에서 팔은 누가 움직이고, 정책은 무엇을 배우는가"**가 궁금하다면
+> 맨 아래 [⭐ 개념 정리](#-개념-정리-시뮬에서-데모는-누가-만들고-정책은-무엇을-배우는가) 섹션부터 읽을 것.
 
 ---
 
@@ -228,3 +232,162 @@ best epoch가 **1995**로 거의 마지막이고, 마지막 500구간이 직전 
 → 평가 성공률이 기대치(≈90%)에 못 미치면 **하이퍼파라미터보다 `--num_epochs 5000`을 먼저** 시도.
 1 epoch = 45 샘플뿐이라 5000 epoch도 약 96분이면 끝난다.
 저자 튜닝 문서의 "loss가 평평해진 뒤에도 더 학습하면 성공률이 계속 오른다"와 방향이 일치한다.
+
+---
+
+## ⭐ 개념 정리: 시뮬에서 데모는 누가 만들고, 정책은 무엇을 배우는가
+
+> 2026-09-18 정리. "teleoperation으로 사람이 직접 조작하는 것도 아닌데 시뮬 안에서 팔이
+> 어떻게 움직이는 거지? 코드가 움직인 거면 학습에 의미가 있나?"라는 의문을 코드로 확인한 내용.
+
+### 0. 대전제 — ACT는 강화학습이 아니라 지도학습이다
+
+ACT는 **행동 복제(behavior cloning)** 다. 보상을 받아가며 스스로 시행착오하는 게 아니라,
+이미 만들어진 (관측 → 행동) 쌍을 **지도학습으로 회귀**할 뿐이다.
+`policy.py`의 손실 함수가 그 증거다.
+
+```python
+all_l1 = F.l1_loss(actions, a_hat, reduction='none')     # 정답 action과의 L1 거리
+loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
+```
+
+보상 항이 없다. 시뮬의 `reward`는 **데모가 성공했는지 판정하고 eval 성공률을 재는 용도**로만
+쓰이고 학습에는 전혀 들어가지 않는다 (`record_sim_episodes.py`에서 `episode_max_reward`를
+성공/실패 출력에만 쓰는 것으로 확인).
+
+→ 따라서 **데모를 사람이 만들든 코드가 만들든 학습 구조는 완전히 동일하다.** 바뀌는 건
+데이터의 "질"뿐이다.
+
+### 1. 시뮬에서 팔이 움직이는 원리 — mocap body가 "사람 손" 역할
+
+실기 teleoperation은 *사람이 leader 팔을 손으로 끌면 → follower 팔이 따라가는* 구조다.
+시뮬에서는 이 **사람 손 자리에 MuJoCo의 mocap body**가 들어간다.
+
+`assets/bimanual_viperx_ee_transfer_cube.xml:6-7`:
+
+```xml
+<weld body1="mocap_left"  body2="vx300s_left/gripper_link"  solref="0.01 1" solimp=".25 .25 0.001" />
+<weld body1="mocap_right" body2="vx300s_right/gripper_link" solref="0.01 1" solimp=".25 .25 0.001" />
+```
+
+mocap body는 **물리법칙을 무시하고 지정 좌표로 순간이동하는 "유령 손잡이"** 이고,
+그게 로봇 손목(`gripper_link`)에 **weld(용접) 구속**으로 붙어 있다.
+`ee_sim_env.py:58-74`가 매 스텝 이 손잡이를 옮긴다.
+
+```python
+def before_step(self, action, physics):
+    np.copyto(physics.data.mocap_pos[0],  action_left[:3])    # 위치 xyz
+    np.copyto(physics.data.mocap_quat[0], action_left[3:7])   # 자세 quaternion
+```
+
+여기서 action은 **관절각이 아니라 엔드이펙터의 xyz + quaternion (7차원 × 2팔 = 14)** 이다.
+손잡이를 끌면 weld 구속을 만족시키려고 **물리 솔버가 알아서 관절을 풀어준다.**
+
+> 즉 **IK를 직접 푸는 코드가 없다.** 물리 시뮬레이터가 대신 풀어주는 것이고,
+> 이게 사람이 leader 팔을 손으로 끄는 것과 물리적으로 같은 상황이다.
+
+### 2. 그 손잡이를 끄는 건 `scripted_policy.py`의 waypoint 테이블
+
+`scripted_policy.py:88-98` (`PickAndTransferPolicy`) — 시간축 키프레임 몇 개가 전부다.
+
+```python
+{"t": 90,  "xyz": box_xyz + np.array([0, 0, 0.08]),   ..., "gripper": 1},  # 큐브 위로 접근
+{"t": 130, "xyz": box_xyz + np.array([0, 0, -0.015]), ..., "gripper": 1},  # 내려감
+{"t": 170, "xyz": box_xyz + np.array([0, 0, -0.015]), ..., "gripper": 0},  # 그리퍼 닫기
+{"t": 200, "xyz": meet_xyz + np.array([0.05, 0, 0]),  ..., "gripper": 0},  # 만나는 지점으로
+```
+
+`BasePolicy.interpolate()` (`scripted_policy.py:23-36`)가 키프레임 사이를 **선형보간**해서
+매 스텝 명령을 만든다. 사람이 손으로 그리던 궤적을 코드가 직선 몇 개로 대신 그리는 셈.
+
+| | 실기 ALOHA | 시뮬 |
+|---|---|---|
+| 궤적을 만드는 주체 | 사람 (teleoperation) | `scripted_policy.py`의 waypoint |
+| 팔에 전달되는 매개 | leader 팔 (사람이 손으로 잡음) | mocap body (weld 구속) |
+| 관절각을 푸는 주체 | 실제 물리 (사람 팔 → 링크) | MuJoCo 물리 솔버 |
+| 저장되는 데이터 | 이미지 + qpos + action | **동일** |
+
+### 3. 데이터 수집이 왜 2단계인가 (`record_sim_episodes.py`의 핵심)
+
+`record_sim_episodes.py`는 한 에피소드를 만들 때 시뮬을 **두 번** 돌린다.
+처음 봤을 때 제일 헷갈렸던 부분인데 이유가 명확하다.
+
+```
+[1단계] ee_sim_env + scripted policy 실행  →  결과로 나온 관절 궤적 qpos 를 기록
+                                               (record_sim_episodes.py:74-82)
+              ↓  EE 궤적을 관절 궤적으로 "번역"
+[2단계] sim_env 에서 그 관절 궤적을 action 으로 재생 → 이미지/qpos 를 기록
+                                               (record_sim_episodes.py:96-110)
+```
+
+**이유**: 실제 ALOHA에서 기록되는 데이터는 EE pose가 아니라
+**leader 팔의 관절각 = follower에게 내려가는 목표 관절각**이다.
+1단계의 EE 제어는 데모를 *만들기 위한 수단*일 뿐이고, 저장되는 데이터 포맷은
+**실기 teleoperation 데이터와 1:1로 같아야** 한다. 그래서 굳이 관절 궤적으로 바꿔
+다시 돌려서 기록한다.
+
+2단계에서 `BOX_POSE[0] = subtask_info`로 1단계와 **같은 물체 배치를 강제**하는 것도 이 때문
+(`sim_env.py:18`의 전역 변수를 밖에서 세팅하는 구조).
+
+결과적으로 hdf5에 남는 건 이것뿐이다 — **EE pose도, 물체 좌표도 안 들어간다.**
+
+| 키 | 내용 |
+|---|---|
+| `observations/images/top` | 카메라 픽셀 (400, 480, 640, 3) uint8 |
+| `observations/qpos` | 현재 관절각 (400, 14) |
+| `observations/qvel` | 관절 속도 (400, 14) |
+| `action` | 다음 목표 관절각 (400, 14) |
+
+### 4. ⭐ "코드가 움직인 건데 학습에 의미가 있나?" → 있다
+
+**핵심은 스크립트와 정책이 보는 정보가 완전히 다르다는 것.**
+
+스크립트는 `scripted_policy.py:73-74`에서 대놓고 커닝을 한다.
+
+```python
+box_info = np.array(ts_first.observation['env_state'])
+box_xyz  = box_info[:3]      # 시뮬레이터 내부에서 큐브 정답 좌표를 그냥 꺼내옴
+```
+
+이건 **특권 정보(privileged information)** — 실제 로봇에는 존재하지 않는, 시뮬레이터만
+아는 정답이다. 반면 학습되는 ACT 정책은 `policy.py:19`에서 보듯 **이미지와 qpos만** 받는다.
+
+```python
+def __call__(self, qpos, image, actions=None, is_pad=None):
+    env_state = None      # ← 물체 좌표를 정책에는 주지 않는다
+```
+
+그리고 큐브 위치는 **에피소드마다 랜덤**이다 (`ee_sim_env.py:162` → `utils.py:133` `sample_box_pose()`,
+`x ∈ [0.0, 0.2]`, `y ∈ [0.4, 0.6]`). 스크립트는 그 좌표를 받아서 풀지만,
+정책은 **픽셀만 보고 큐브가 어디 있는지 추론해야** 한다.
+
+> 즉 이 학습은 "코드가 시킨 대로 따라하기"가 아니라
+> **정답을 아는 스크립트 → 카메라만 보는 신경망으로의 증류(distillation)** 다.
+
+정책이 실제로 새로 획득하는 능력:
+
+1. **시각적 물체 위치 추정** — 이미지에서 큐브가 어디 있는지 (ResNet18 backbone)
+2. **visuomotor 매핑** — 시각 정보 + 현재 관절각 → 목표 관절각
+3. **action chunking** — 한 번에 `num_queries`(= `chunk_size` 100) 스텝을 통째로 예측
+   (`detr/models/detr_vae.py:54`의 `query_embed`)
+
+스크립트는 이 중 **어느 것도 갖고 있지 않다.** 그래서 eval 성공률이 나온다는 건
+네트워크가 스크립트 코드를 외운 게 아니라 시각-운동 정책을 새로 배웠다는 증거다.
+
+### 5. 단, scripted 데이터의 한계
+
+사람 데모에 있는 두 가지가 없다.
+
+- **멀티모달리티** — 사람은 같은 상황에서 매번 조금씩 다른 궤적을 그리지만,
+  스크립트는 큐브 좌표가 같으면 **항상 동일한 직선 보간 궤적**을 낸다.
+  게다가 `record_sim_episodes.py:31`에 `inject_noise = False`가 **하드코딩**되어 있어
+  변동성이 아예 0이다 (`scripted_policy.py`에는 `±0.01` 노이즈 주입 코드가 있는데 안 쓰임).
+- **비정형성** — 사람 특유의 멈칫거림, 재시도, 속도 변화가 없다.
+
+ACT의 CVAE 구조(style variable `z`, `policy.py:26-33`의 KL 항)는 원래 이 **멀티모달리티를
+다루려고** 있는 건데, scripted 데이터는 거의 결정적이라 그 효용이 잘 드러나지 않는다.
+논문에서 `sim_transfer_cube_scripted`가 `_human`보다 성공률이 높게 나오는 이유도 이것.
+
+**정리**: 지금 하는 실습은 파이프라인 전체(데이터 생성 → 학습 → 평가)를 검증하는 데는 충분하다.
+다만 알고리즘의 어려운 부분(멀티모달 데모 처리)은 덜 드러난다.
+→ 이를 체감해 보는 실험은 [NEXT.md](../NEXT.md)의 "이후 후보"에 적어둠.

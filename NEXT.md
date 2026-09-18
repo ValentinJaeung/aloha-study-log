@@ -3,8 +3,11 @@
 > 이 파일은 "며칠/몇 주 뒤에 돌아왔을 때 3분 안에 다시 시작하기" 위한 파일입니다.
 > 작업을 마칠 때마다 이 파일을 갱신하세요.
 
-**마지막 작업일: 2026-09-18** (ACT 학습 2000 epoch 완료)
+**마지막 작업일: 2026-09-18** (ACT 학습 2000 epoch 완료 + 데모 생성 구조 개념 정리)
 **중단 지점: 학습 끝(38분, best val loss 0.0458 @ epoch 1995). 평가(eval)는 아직 안 돌림.**
+
+> 💡 "시뮬 안에서 팔이 어떻게 움직이고, 코드가 만든 데모로 학습하는 게 왜 의미가 있는가"는
+> [docs/01-act-sim.md](docs/01-act-sim.md)의 **"⭐ 개념 정리"** 섹션에 정리해둠.
 
 ---
 
@@ -109,6 +112,62 @@ python3 imitate_episodes.py \
    - ACT vs Diffusion Policy 성능 비교가 목표
 3. **하이퍼파라미터 실험**: `chunk_size`(100 → 50/200), `kl_weight` 변화에 따른 성공률 비교
 4. **mobile-aloha 코드 읽기** → [docs/03-mobile-aloha.md](docs/03-mobile-aloha.md)
+
+---
+
+## 4. 나중에 할 것 — 데모 데이터의 "질"을 바꿔보는 실험
+
+> 배경: 지금 쓰는 `sim_transfer_cube_scripted`는 **코드가 만든 데모**라
+> 파이프라인(데이터 생성 → 학습 → 평가) 검증에는 충분하지만,
+> 알고리즘의 어려운 부분(**멀티모달 데모 처리**)은 잘 드러나지 않는다.
+> 개념 정리는 [docs/01-act-sim.md](docs/01-act-sim.md)의 "⭐ 개념 정리" 섹션 5번 참고.
+>
+> ⚠️ 둘 다 **평가(1번)를 먼저 끝내고 기준 성공률을 확보한 뒤에** 할 것. 비교 대상이 없으면 의미가 없다.
+
+### 4-1. `inject_noise=True`로 데이터를 다시 만들어 비교
+
+`record_sim_episodes.py:31`에 `inject_noise = False`가 **하드코딩**되어 있다.
+`scripted_policy.py:54-58`에는 EE 위치에 `±0.01` 균일 노이즈를 주는 코드가 이미 있는데 안 쓰이는 상태.
+
+```python
+# record_sim_episodes.py:31 — 하드코딩된 값을 인자로 빼거나 직접 True로 변경
+inject_noise = False   # → True
+```
+
+- [ ] `record_sim_episodes.py`에 `--inject_noise` 플래그 추가 (지금은 하드코딩이라 코드 수정 필요)
+      → 수정하면 **`patches/act.patch`도 다시 뜰 것**
+- [ ] 별도 디렉터리에 50 에피소드 재생성
+      (`$ALOHA_DATA_DIR/sim_transfer_cube_scripted_noise`) ⚠️ **+18 GB 디스크 필요**
+- [ ] `constants.py`의 `SIM_TASK_CONFIGS`에 태스크 항목 추가 필요
+- [ ] 같은 하이퍼파라미터로 학습 → 성공률 비교 (`--ckpt_dir`을 꼭 분리)
+- **관찰 포인트**: 노이즈가 들어가면 궤적이 매번 달라져 데이터가 어려워지는데,
+  그 대신 **분포 밖 상태에서의 복원력**이 생겨 성공률이 오를 수 있다.
+  둘 중 어느 쪽이 이기는지 직접 확인하는 게 목적.
+
+### 4-2. `_human` 데이터셋(실제 teleoperation)으로 같은 학습 돌려 비교
+
+저자가 공개한 **사람이 직접 조작한 데모**. `constants.py`의 `SIM_TASK_CONFIGS`에
+`sim_transfer_cube_human`(50 ep / 400 step), `sim_insertion_human`(50 ep / 500 step) 항목이
+**이미 정의되어 있다** — `dataset_dir`도 `$ALOHA_DATA_DIR/sim_transfer_cube_human`으로 잡혀 있어
+**데이터만 그 경로에 갖다 놓으면 코드 수정 없이 바로 돌아간다.**
+
+- [ ] 저자 배포 데이터 내려받기 (`sim_transfer_cube_human` 50 에피소드)
+      → https://drive.google.com/drive/folders/1gPR03v05S1xiInoVJn7G7VJ9pDCnxq9O (act README 기재)
+- [ ] `$ALOHA_DATA_DIR/sim_transfer_cube_human/`에 그대로 배치 (⚠️ 여기도 +18 GB 수준)
+- [ ] `--task_name sim_transfer_cube_human`으로 동일 하이퍼파라미터 학습 → 성공률 비교
+- **관찰 포인트**:
+  - 사람 데모는 **멀티모달**(같은 상황에서 매번 다른 궤적)이라 일반적으로 `_scripted`보다
+    성공률이 낮게 나온다. 논문 수치와 대조해볼 것.
+  - ACT의 **CVAE(style variable `z`, `kl_weight`)가 여기서 비로소 일을 한다.**
+    `_human`에서 `kl_weight`를 바꿔가며(예: 10 → 1 → 100) 성공률 변화를 보면
+    CVAE의 역할을 체감할 수 있다 → 위 3번 하이퍼파라미터 실험과 묶어서 하면 효율적
+  - 가능하면 `_scripted` / `_scripted+noise` / `_human` **3자 비교표**로 정리
+
+| 데이터셋 | 데모 생성 주체 | 멀티모달리티 | 성공률 |
+|---|---|---|---|
+| `sim_transfer_cube_scripted` | 코드 (waypoint 보간) | 없음 | (평가 대기) |
+| `..._scripted` + `inject_noise` | 코드 + ±0.01 노이즈 | 약간 | (미실행) |
+| `sim_transfer_cube_human` | 사람 (teleoperation) | 있음 | (미실행) |
 
 ---
 
